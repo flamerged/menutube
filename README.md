@@ -13,8 +13,9 @@ Built on `mpv` + `yt-dlp`. The plugin is a thin UI; mpv handles playback and aut
 - Add via menu: paste a URL → title auto-fetched via `yt-dlp` and pre-filled in a confirmation dialog.
 - Repeat-on-end toggle: persists across plays, also flips the loop state on the currently-playing track via mpv IPC.
 - Built-in `yt-dlp` version display and one-click update via Homebrew.
+- Built-in plugin version status: release installs show whether menutube is current or a newer release is available.
 - Refetch-all-titles action for when YouTube changes something.
-- No private data leaves your machine; the plugin only talks to local mpv IPC and (when invoked) `brew`, `osascript`, and the public YouTube/Homebrew endpoints `yt-dlp` and `brew` reach out to.
+- No private data leaves your machine; the plugin only talks to local mpv IPC and (when invoked) `brew`, `osascript`, the public GitHub release endpoint, and the public YouTube/Homebrew endpoints `yt-dlp` and `brew` reach out to.
 
 ## Demo
 
@@ -62,7 +63,7 @@ cd menutube
 ./scripts/install-dev-swiftbar.sh "$HOME/SwiftBarPlugins"
 ```
 
-Release installs show **Update to latest release**, so normal users do not need git. The updater runs in the background, writes to `MENUTUBE_UPDATE_LOG`, and replaces the plugin with the latest release asset. Source checkout installs show the current branch and commit for diagnostics, but hide the menu updater to avoid overwriting checkout-managed files. Development updates should use normal git commands in the checkout.
+Release installs show whether the installed plugin is current or whether a newer release is available. **Update to latest release** runs in the background, writes to `MENUTUBE_UPDATE_LOG`, and replaces the plugin with the latest release asset. Source checkout installs show the current branch and commit for diagnostics, but hide the menu updater to avoid overwriting checkout-managed files. Development updates should use normal git commands in the checkout.
 
 ### Linux
 
@@ -105,6 +106,9 @@ menutube works without configuration. These environment variables can tailor it 
 | `MENUTUBE_REPO_URL` | `https://github.com/flamerged/menutube` | Repository URL for the "Open project page" footer link |
 | `MENUTUBE_RELEASE_ASSET_URL` | `https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh` | HTTPS latest release asset URL used by the "Update to latest release" action |
 | `MENUTUBE_UPDATE_LOG` | `$HOME/.cache/menutube/update.log` | Update log path |
+| `MENUTUBE_CHECK_RELEASE_UPDATES` | `1` | Set to `0` to disable cached plugin release checks |
+| `MENUTUBE_RELEASE_CHECK_TTL_SECONDS` | `86400` | Minimum seconds between automatic latest-release checks |
+| `MENUTUBE_RELEASE_CHECK_CACHE` | `$HOME/.cache/menutube/release-check.tsv` | Latest-release check cache path |
 | `MENUTUBE_MPV` | auto-detected | Override path to mpv |
 | `MENUTUBE_YTDLP` | auto-detected | Override path to yt-dlp |
 | `MENUTUBE_USER_AGENT` | Safari 17 desktop UA | User-Agent for HLS segment fetches |

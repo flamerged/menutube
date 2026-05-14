@@ -34,6 +34,9 @@ for var in \
   'MENUTUBE_REPO_URL' \
   'MENUTUBE_RELEASE_ASSET_URL' \
   'MENUTUBE_UPDATE_LOG' \
+  'MENUTUBE_CHECK_RELEASE_UPDATES' \
+  'MENUTUBE_RELEASE_CHECK_TTL_SECONDS' \
+  'MENUTUBE_RELEASE_CHECK_CACHE' \
   'MENUTUBE_MPV' \
   'MENUTUBE_YTDLP' \
   'MENUTUBE_USER_AGENT' \
@@ -43,7 +46,7 @@ done
 print "    OK"
 
 print "==> dry render"
-output="$(MENUTUBE_CONFIG_DIR="$(mktemp -d)" "$PLUGIN")"
+output="$(MENUTUBE_CONFIG_DIR="$(mktemp -d)" MENUTUBE_CHECK_RELEASE_UPDATES=0 "$PLUGIN")"
 print -r -- "$output" | grep -q '📚 Library' || { print -u2 "Library header missing"; exit 1; }
 print -r -- "$output" | grep -q '➕ Add video' || { print -u2 "Add action missing"; exit 1; }
 print -r -- "$output" | grep -q '🛠 Edit library file' || { print -u2 "Edit action missing"; exit 1; }
@@ -51,7 +54,7 @@ print -r -- "$output" | grep -q '🔧 Tools' || { print -u2 "Tools section missi
 print "    OK"
 
 print "==> literal-tilde defense (regression guard for the 0.1.0 bug)"
-literal_tilde_output="$(MENUTUBE_CONFIG_DIR='~/.config/menutube-literal-tilde-test' "$PLUGIN" 2>&1 || true)"
+literal_tilde_output="$(MENUTUBE_CONFIG_DIR='~/.config/menutube-literal-tilde-test' MENUTUBE_CHECK_RELEASE_UPDATES=0 "$PLUGIN" 2>&1 || true)"
 print -r -- "$literal_tilde_output" | grep -q '📚 Library' \
   || { print -u2 "literal-tilde MENUTUBE_CONFIG_DIR should still render Library section"; exit 1; }
 print "    OK"
