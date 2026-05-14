@@ -4,13 +4,16 @@
 # <xbar.author>flamerged</xbar.author>
 # <xbar.author.github>flamerged</xbar.author.github>
 # <xbar.desc>Background YouTube audio player for the menu bar — mpv + yt-dlp, with macOS media-key support.</xbar.desc>
-# <xbar.dependencies>zsh, mpv, yt-dlp, jq, nc</xbar.dependencies>
+# <xbar.dependencies>zsh, mpv, yt-dlp, jq, nc, curl</xbar.dependencies>
 # <xbar.abouturl>https://github.com/flamerged/menutube</xbar.abouturl>
 # <xbar.var>string(MENUTUBE_CONFIG_DIR="~/.config/menutube"): Library / preferences directory</xbar.var>
 # <xbar.var>string(MENUTUBE_REPO_DIR=""): Optional menutube git checkout for source metadata</xbar.var>
 # <xbar.var>string(MENUTUBE_REPO_URL="https://github.com/flamerged/menutube"): menutube repository URL</xbar.var>
 # <xbar.var>string(MENUTUBE_RELEASE_ASSET_URL="https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh"): Latest release asset URL for copied-plugin updates</xbar.var>
 # <xbar.var>string(MENUTUBE_UPDATE_LOG="~/.cache/menutube/update.log"): Update log file path</xbar.var>
+# <xbar.var>boolean(MENUTUBE_CHECK_RELEASE_UPDATES=true): Check latest menutube release in the background</xbar.var>
+# <xbar.var>string(MENUTUBE_RELEASE_CHECK_TTL_SECONDS="86400"): Seconds between latest-release checks when enabled</xbar.var>
+# <xbar.var>string(MENUTUBE_RELEASE_CHECK_CACHE="~/.cache/menutube/release-check.tsv"): Latest-release check cache path</xbar.var>
 # <xbar.var>string(MENUTUBE_MPV=""): Override path to mpv binary (auto-detected)</xbar.var>
 # <xbar.var>string(MENUTUBE_YTDLP=""): Override path to yt-dlp binary (auto-detected)</xbar.var>
 # <xbar.var>string(MENUTUBE_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"): User-Agent for HLS segment fetches</xbar.var>
@@ -51,12 +54,16 @@ SCRIPT="$0"
 : "${MENUTUBE_REPO_URL:=https://github.com/flamerged/menutube}"
 : "${MENUTUBE_RELEASE_ASSET_URL:=https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh}"
 : "${MENUTUBE_UPDATE_LOG:=$HOME/.cache/menutube/update.log}"
+: "${MENUTUBE_CHECK_RELEASE_UPDATES:=1}"
+: "${MENUTUBE_RELEASE_CHECK_TTL_SECONDS:=86400}"
+: "${MENUTUBE_RELEASE_CHECK_CACHE:=$HOME/.cache/menutube/release-check.tsv}"
 # Expand leading ~ in case SwiftBar passes the xbar.var default literally.
 # Without this the plugin would read library.json from cwd, get nothing,
 # and render an empty library.
 MENUTUBE_CONFIG_DIR="${MENUTUBE_CONFIG_DIR/#\~/$HOME}"
 MENUTUBE_REPO_DIR="${MENUTUBE_REPO_DIR/#\~/$HOME}"
 MENUTUBE_UPDATE_LOG="${MENUTUBE_UPDATE_LOG/#\~/$HOME}"
+MENUTUBE_RELEASE_CHECK_CACHE="${MENUTUBE_RELEASE_CHECK_CACHE/#\~/$HOME}"
 
 LIBRARY="$MENUTUBE_CONFIG_DIR/library.json"
 REPEAT_FILE="$MENUTUBE_CONFIG_DIR/repeat"      # "yes" | "no"
@@ -205,6 +212,156 @@ plugin_version_label() {
     fi
   fi
   printf 'v%s' "$PLUGIN_VERSION"
+}
+
+truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cache_mtime() {
+  local file="$1"
+  [[ -f "$file" ]] || { printf ''; return; }
+  if stat -f %m "$file" >/dev/null 2>&1; then
+    stat -f %m "$file"
+  elif stat -c %Y "$file" >/dev/null 2>&1; then
+    stat -c %Y "$file"
+  fi
+}
+
+release_tag_norm() {
+  printf '%s' "${1%%-*}" | /usr/bin/sed 's/^v//'
+}
+
+latest_release_tag_from_asset_url() {
+  local tag
+  tag="$(printf '%s' "$MENUTUBE_RELEASE_ASSET_URL" | /usr/bin/sed -n 's#.*releases/download/\([^/]*\)/.*#\1#p' | head -1)"
+  [[ -n "$tag" ]] || return 1
+  printf '%s' "$tag"
+}
+
+github_repo_slug() {
+  local slug
+  [[ "$MENUTUBE_REPO_URL" == https://github.com/* ]] || return 1
+  slug="${MENUTUBE_REPO_URL#https://github.com/}"
+  slug="${slug%%\?*}"
+  slug="${slug%%#*}"
+  slug="${slug%/}"
+  slug="${slug%.git}"
+  [[ "$slug" == */* && "$slug" != */*/* ]] || return 1
+  printf '%s' "$slug"
+}
+
+latest_release_tag() {
+  local curl_bin repo tag
+  curl_bin="$(command -v curl)"
+  [[ -n "$curl_bin" ]] || return 1
+  if repo="$(github_repo_slug)" && [[ -n "$repo" ]]; then
+    tag="$("$curl_bin" -fsSL \
+      --connect-timeout 5 \
+      --max-time 15 \
+      --retry 1 \
+      -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null \
+      | "$JQ" -r '.tag_name // empty' 2>/dev/null)"
+    if [[ -n "$tag" && "$tag" != "null" ]]; then
+      printf '%s' "$tag"
+      return
+    fi
+  fi
+  latest_release_tag_from_asset_url
+}
+
+write_release_check_cache() {
+  local now tmp latest check_status rc
+  now="$(date +%s 2>/dev/null || printf '0')"
+  mkdir -p "${MENUTUBE_RELEASE_CHECK_CACHE:h}" 2>/dev/null || {
+    rm -f "${MENUTUBE_RELEASE_CHECK_CACHE}.lock" 2>/dev/null || true
+    return 1
+  }
+  tmp="${MENUTUBE_RELEASE_CHECK_CACHE}.$$"
+  if latest="$(latest_release_tag)"; then
+    check_status="ok"
+  else
+    check_status="error"
+    latest=""
+  fi
+  if printf '%s\t%s\t%s\n' "$now" "$check_status" "$latest" > "$tmp" \
+    && mv "$tmp" "$MENUTUBE_RELEASE_CHECK_CACHE"; then
+    [[ "$check_status" == "ok" ]]
+    rc=$?
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    rc=1
+  fi
+  rm -f "${MENUTUBE_RELEASE_CHECK_CACHE}.lock" 2>/dev/null || true
+  return "$rc"
+}
+
+release_check_cache_fields() {
+  [[ -f "$MENUTUBE_RELEASE_CHECK_CACHE" ]] || return 1
+  local ts check_status latest rest
+  IFS=$'\t' read -r ts check_status latest rest < "$MENUTUBE_RELEASE_CHECK_CACHE" || return 1
+  printf '%s\t%s\t%s\n' "$ts" "$check_status" "$latest"
+}
+
+release_check_cache_age() {
+  local mtime now
+  mtime="$(cache_mtime "$MENUTUBE_RELEASE_CHECK_CACHE")"
+  [[ -n "$mtime" ]] || { printf ''; return; }
+  now="$(date +%s 2>/dev/null || printf '0')"
+  printf '%s' $(( now - mtime ))
+}
+
+maybe_refresh_release_check() {
+  truthy "$MENUTUBE_CHECK_RELEASE_UPDATES" || return
+  [[ "$MENUTUBE_RELEASE_CHECK_TTL_SECONDS" == <-> ]] || MENUTUBE_RELEASE_CHECK_TTL_SECONDS=86400
+  local age now lock_age
+  age="$(release_check_cache_age)"
+  if [[ -n "$age" && "$age" -le "$MENUTUBE_RELEASE_CHECK_TTL_SECONDS" ]]; then
+    return
+  fi
+  now="$(date +%s 2>/dev/null || printf '0')"
+  lock_age="$(cache_mtime "${MENUTUBE_RELEASE_CHECK_CACHE}.lock")"
+  if [[ -n "$lock_age" && $(( now - lock_age )) -lt 120 ]]; then
+    return
+  fi
+  mkdir -p "${MENUTUBE_RELEASE_CHECK_CACHE:h}" 2>/dev/null || return
+  : > "${MENUTUBE_RELEASE_CHECK_CACHE}.lock" 2>/dev/null || return
+  "$SCRIPT" check-release >/dev/null 2>&1 &
+}
+
+release_status_label() {
+  local current="$1" fields ts check_status latest
+  truthy "$MENUTUBE_CHECK_RELEASE_UPDATES" || { printf 'update checks disabled'; return; }
+  fields="$(release_check_cache_fields)" || { printf 'checking latest release'; return; }
+  IFS=$'\t' read -r ts check_status latest <<< "$fields"
+  if [[ "$check_status" != "ok" || -z "$latest" ]]; then
+    printf 'latest check unavailable'
+  elif [[ "$(release_tag_norm "$latest")" == "$(release_tag_norm "$current")" ]]; then
+    printf 'latest'
+  else
+    printf 'update %s available' "$latest"
+  fi
+}
+
+release_status_color() {
+  local label="$1"
+  case "$label" in
+    update\ *\ available) printf '#cc6633' ;;
+    latest) printf '#2f8f46' ;;
+    *) printf '#888888' ;;
+  esac
+}
+
+cached_latest_release_tag() {
+  local fields ts check_status latest
+  fields="$(release_check_cache_fields)" || return 1
+  IFS=$'\t' read -r ts check_status latest <<< "$fields"
+  [[ "$check_status" == "ok" && -n "$latest" ]] || return 1
+  printf '%s' "$latest"
 }
 
 update_log() {
@@ -447,6 +604,7 @@ case "${1:-}" in
   update-log) action_open_update_log; exit 0 ;;
   refetch)  action_refetch_titles; exit 0 ;;
   update)   action_update_ytdlp;   exit 0 ;;
+  check-release) write_release_check_cache; exit $? ;;
   update-release) action_update_release; exit $? ;;
 esac
 
@@ -574,7 +732,14 @@ echo "--🔄 Refresh menu | refresh=true"
 echo "-----"
 plugin_root="$(plugin_repo_root)"
 version_label="$(plugin_version_label "$plugin_root")"
-echo "--Version: ${version_label} | font=Menlo color=#888888"
+if [[ -z "$plugin_root" ]]; then
+  maybe_refresh_release_check
+  release_status="$(release_status_label "$version_label")"
+  release_color="$(release_status_color "$release_status")"
+  echo "--Version: ${version_label} (${release_status}) | font=Menlo color=$release_color"
+else
+  echo "--Version: ${version_label} | font=Menlo color=#888888"
+fi
 echo "--Plugin: ${PLUGIN_PATH/#$HOME/~} | font=Menlo size=10 color=#888888"
 if [[ -n "$plugin_root" ]]; then
   git_summary="$(plugin_git_summary "$plugin_root")"
@@ -582,7 +747,13 @@ if [[ -n "$plugin_root" ]]; then
   echo "--Git: ${git_summary:-unknown} | font=Menlo size=10 color=#888888"
   echo "----Use git commands for development updates | color=gray size=10"
 else
-  echo "--⬆️ Update to latest release | bash=$SCRIPT param1=update-release terminal=false refresh=true"
+  latest_release="$(cached_latest_release_tag 2>/dev/null || true)"
+  if [[ -n "$latest_release" && "$(release_tag_norm "$latest_release")" != "$(release_tag_norm "$version_label")" ]]; then
+    echo "--⬆️ Update to $latest_release | bash=$SCRIPT param1=update-release terminal=false refresh=true"
+  else
+    echo "--⬆️ Update to latest release | bash=$SCRIPT param1=update-release terminal=false refresh=true"
+  fi
+  echo "--🔎 Check plugin update status now | bash=$SCRIPT param1=check-release terminal=false refresh=true"
 fi
 [[ -f "$MENUTUBE_UPDATE_LOG" ]] && echo "--📝 Open update log | bash=$SCRIPT param1=update-log terminal=false"
 echo "--🌐 Open project page | href=$MENUTUBE_REPO_URL"
