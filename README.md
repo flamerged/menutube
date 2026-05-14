@@ -29,18 +29,40 @@ When you first install, the library is seeded with three known-good 24/7 audio s
    ```sh
    brew install mpv yt-dlp jq
    ```
-3. Clone this repo and symlink the plugin:
+3. Download the latest release plugin into your SwiftBar plugin folder:
    ```sh
-   git clone https://github.com/flamerged/menutube.git
-   cd menutube
-   ./scripts/install-swiftbar.sh "$HOME/SwiftBarPlugins"
+   mkdir -p "$HOME/SwiftBarPlugins"
+   curl -fsSL \
+     https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh \
+     -o "$HOME/SwiftBarPlugins/menutube.5s.sh"
+   chmod +x "$HOME/SwiftBarPlugins/menutube.5s.sh"
    ```
 
 SwiftBar picks up `menutube.5s.sh` and refreshes every 5 seconds.
 
 ### xbar
 
-menutube uses the BitBar/xbar stdout menu format. Install it by copying or symlinking `bin/menutube.5s.sh` into your xbar plugin folder.
+menutube uses the BitBar/xbar stdout menu format. Install the latest release asset into your xbar plugin folder:
+
+```sh
+mkdir -p "$HOME/Library/Application Support/xbar/plugins"
+curl -fsSL \
+  https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh \
+  -o "$HOME/Library/Application Support/xbar/plugins/menutube.5s.sh"
+chmod +x "$HOME/Library/Application Support/xbar/plugins/menutube.5s.sh"
+```
+
+### Development Install
+
+Clone the repo only when you want a source checkout for development:
+
+```sh
+git clone https://github.com/flamerged/menutube.git
+cd menutube
+./scripts/install-swiftbar.sh "$HOME/SwiftBarPlugins"
+```
+
+Release installs show **Update to latest release**, so normal users do not need git. Source checkout installs show the current branch and commit for diagnostics, but hide the menu updater to avoid overwriting checkout-managed files. Development updates should use normal git commands in the checkout.
 
 ### Linux
 
@@ -79,6 +101,9 @@ menutube works without configuration. These environment variables can tailor it 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MENUTUBE_CONFIG_DIR` | `~/.config/menutube` | Library and preferences directory |
+| `MENUTUBE_REPO_DIR` | empty | Optional menutube git checkout for source metadata (hides the menu updater) |
+| `MENUTUBE_REPO_URL` | `https://github.com/flamerged/menutube` | Repository URL for the "Open project page" footer link |
+| `MENUTUBE_RELEASE_ASSET_URL` | `https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh` | Latest release asset URL used by the "Update to latest release" action |
 | `MENUTUBE_MPV` | auto-detected | Override path to mpv |
 | `MENUTUBE_YTDLP` | auto-detected | Override path to yt-dlp |
 | `MENUTUBE_USER_AGENT` | Safari 17 desktop UA | User-Agent for HLS segment fetches |

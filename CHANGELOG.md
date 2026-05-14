@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Update to latest release** menu action for copied-plugin installs: downloads the release asset from `MENUTUBE_RELEASE_ASSET_URL` via `curl` with timeout/retry, validates shebang + plugin metadata, and atomically replaces the plugin file. Refuses to run when the plugin path is inside a git checkout (developers should use git).
+- Live version label in the Tools footer derived from the local git tag (`git describe --tags HEAD`), with a fallback to the hard-coded `PLUGIN_VERSION` when not in a checkout.
+- "Open project page" footer link pointing at `MENUTUBE_REPO_URL`.
+- `scripts/auto-release.sh` and a matching `release.yml` workflow that auto-tags and creates a GitHub Release on push to main, based on conventional commit prefixes since the last `v*` tag. Replaces the prior release-please scaffold.
+- `MENUTUBE_REPO_DIR`, `MENUTUBE_REPO_URL`, and `MENUTUBE_RELEASE_ASSET_URL` env vars (declared as `xbar.var` entries).
+- Defensive tilde expansion on `MENUTUBE_CONFIG_DIR` and `MENUTUBE_REPO_DIR` so xbar.var defaults with a literal `~` resolve correctly when SwiftBar injects them.
+- `scripts/check.sh` now validates xbar.var declarations, runs an auto-release dry-run, and guards against the literal-tilde regression.
+
+### Changed
+
+- README install instructions now point at the latest release asset (`curl ... releases/latest/download/menutube.5s.sh`) for both SwiftBar and xbar. Git clone is documented as the **Development Install** path only.
+
+### Removed
+
+- `release-please-config.json` and `.release-please-manifest.json` — release-please is replaced by the auto-release script.
+
+### Fixed
+
+- Library appearing empty in SwiftBar after the xbar.var injection used a literal `~/` path (now expanded explicitly).
+
 ## [0.2.0](https://github.com/flamerged/menutube/compare/v0.1.0...v0.2.0) (2026-05-14)
 
 

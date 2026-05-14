@@ -7,6 +7,9 @@
 # <xbar.dependencies>zsh, mpv, yt-dlp, jq, nc</xbar.dependencies>
 # <xbar.abouturl>https://github.com/flamerged/menutube</xbar.abouturl>
 # <xbar.var>string(MENUTUBE_CONFIG_DIR="~/.config/menutube"): Library / preferences directory</xbar.var>
+# <xbar.var>string(MENUTUBE_REPO_DIR=""): Optional menutube git checkout for source metadata</xbar.var>
+# <xbar.var>string(MENUTUBE_REPO_URL="https://github.com/flamerged/menutube"): menutube repository URL</xbar.var>
+# <xbar.var>string(MENUTUBE_RELEASE_ASSET_URL="https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh"): Latest release asset URL for copied-plugin updates</xbar.var>
 # <xbar.var>string(MENUTUBE_MPV=""): Override path to mpv binary (auto-detected)</xbar.var>
 # <xbar.var>string(MENUTUBE_YTDLP=""): Override path to yt-dlp binary (auto-detected)</xbar.var>
 # <xbar.var>string(MENUTUBE_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"): User-Agent for HLS segment fetches</xbar.var>
@@ -32,6 +35,10 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PAT
 export LC_ALL=en_US.UTF-8
 
 PLUGIN_VERSION="0.2.0" # x-release-please-version
+# Resolve symlinks so the plugin can find its own git repo even when
+# SwiftBar invokes it via ~/SwiftBarPlugins/menutube.5s.sh -> .../bin/...
+PLUGIN_PATH="${0:A}"
+PLUGIN_DIR="${PLUGIN_PATH:h}"
 SCRIPT="$0"
 
 # ============================================================
@@ -39,6 +46,15 @@ SCRIPT="$0"
 # ============================================================
 
 : "${MENUTUBE_CONFIG_DIR:=$HOME/.config/menutube}"
+: "${MENUTUBE_REPO_DIR:=}"
+: "${MENUTUBE_REPO_URL:=https://github.com/flamerged/menutube}"
+: "${MENUTUBE_RELEASE_ASSET_URL:=https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh}"
+# Expand leading ~ in case SwiftBar passes the xbar.var default literally.
+# Without this the plugin would read library.json from cwd, get nothing,
+# and render an empty library.
+MENUTUBE_CONFIG_DIR="${MENUTUBE_CONFIG_DIR/#\~/$HOME}"
+MENUTUBE_REPO_DIR="${MENUTUBE_REPO_DIR/#\~/$HOME}"
+
 LIBRARY="$MENUTUBE_CONFIG_DIR/library.json"
 REPEAT_FILE="$MENUTUBE_CONFIG_DIR/repeat"      # "yes" | "no"
 SOCKET="${TMPDIR:-/tmp}/menutube-mpv.sock"
@@ -130,6 +146,62 @@ yt_ver_norm() { printf '%s' "$1" | /usr/bin/sed 's/\.0*\([1-9]\)/.\1/g'; }
 
 notify() {
   /usr/bin/osascript -e "display notification \"${2//\"/\\\"}\" with title \"${1//\"/\\\"}\"" 2>/dev/null
+}
+
+# ============================================================
+# Plugin self-update / version-from-git-tag (mirrors agent-watch)
+# ============================================================
+
+plugin_repo_root() {
+  command -v git >/dev/null 2>&1 || return
+  local candidate="$MENUTUBE_REPO_DIR"
+  if [[ -n "$candidate" ]] && git -C "$candidate" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$candidate" rev-parse --show-toplevel 2>/dev/null
+    return
+  fi
+  candidate="${PLUGIN_DIR:h}"
+  if git -C "$candidate" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$candidate" rev-parse --show-toplevel 2>/dev/null
+  fi
+}
+
+plugin_git_summary() {
+  local root="$1" branch sha upstream counts ahead behind dirty state
+  command -v git >/dev/null 2>&1 || return
+  branch="$(git -C "$root" branch --show-current 2>/dev/null)"
+  sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)"
+  upstream="$(git -C "$root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
+  dirty="$(git -C "$root" status --porcelain 2>/dev/null)"
+  state=""
+  if [[ -n "$upstream" ]]; then
+    counts="$(git -C "$root" rev-list --left-right --count HEAD..."$upstream" 2>/dev/null)"
+    ahead="${counts%%[[:space:]]*}"
+    behind="${counts##*[[:space:]]}"
+    [[ -n "$ahead" && "$ahead" != "0" ]] && state="${state}, ${ahead} ahead"
+    [[ -n "$behind" && "$behind" != "0" ]] && state="${state}, ${behind} behind"
+  fi
+  [[ -n "$dirty" ]] && state="${state}, dirty"
+  printf '%s' "${branch:-detached} ${sha:-unknown}${state}"
+}
+
+# Prefer the live git tag when installed from a checkout — that way the
+# plugin file's hard-coded PLUGIN_VERSION can stay one version behind the
+# tag without anyone needing to bump it manually.
+plugin_version_label() {
+  local root="${1:-}" exact desc
+  if [[ -n "$root" ]] && command -v git >/dev/null 2>&1; then
+    exact="$(git -C "$root" describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null)"
+    if [[ -n "$exact" ]]; then
+      printf '%s' "$exact"
+      return
+    fi
+    desc="$(git -C "$root" describe --tags --match 'v[0-9]*' --long --always HEAD 2>/dev/null)"
+    if [[ "$desc" == v* ]]; then
+      printf '%s' "$desc"
+      return
+    fi
+  fi
+  printf 'v%s' "$PLUGIN_VERSION"
 }
 
 # ============================================================
@@ -251,6 +323,67 @@ action_refetch_titles() {
   notify "menutube" "Refetched $fixed / $count titles."
 }
 
+action_update_release() {
+  # Refuse if the running plugin file lives inside its own git checkout —
+  # we don't want to clobber a developer's working tree from the menu.
+  local repo_root
+  repo_root="$(plugin_repo_root)"
+  if [[ -n "$repo_root" && "$PLUGIN_PATH" == "$repo_root"/* ]]; then
+    print "Plugin appears to be running from a git checkout: $repo_root"
+    print "Use git commands in the checkout for development updates."
+    return 1
+  fi
+
+  local curl_bin
+  curl_bin="$(command -v curl)"
+  if [[ -z "$curl_bin" ]]; then
+    print "curl is required to update from the latest release."
+    return 1
+  fi
+  if [[ ! -w "$PLUGIN_PATH" || ! -w "$PLUGIN_DIR" ]]; then
+    print "Plugin file or directory is not writable: $PLUGIN_PATH"
+    return 1
+  fi
+
+  local tmp first_line content
+  tmp="${PLUGIN_DIR}/.menutube.5s.sh.$$"
+  rm -f "$tmp"
+
+  print "Downloading latest menutube release asset..."
+  if ! "$curl_bin" -fsSL \
+    --connect-timeout 5 \
+    --max-time 30 \
+    --retry 2 \
+    --retry-delay 1 \
+    "$MENUTUBE_RELEASE_ASSET_URL" -o "$tmp"; then
+    rm -f "$tmp"
+    print "Download failed: $MENUTUBE_RELEASE_ASSET_URL"
+    return 1
+  fi
+
+  IFS= read -r first_line < "$tmp" || first_line=""
+  content="$(< "$tmp")"
+  if [[ "$first_line" != "#!/bin/zsh" \
+     || "$content" != *"<xbar.title>menutube</xbar.title>"* \
+     || "$content" != *"PLUGIN_VERSION=\""* ]]; then
+    rm -f "$tmp"
+    print "Downloaded file did not look like a menutube plugin."
+    return 1
+  fi
+
+  chmod +x "$tmp" || {
+    rm -f "$tmp"
+    print "Could not mark downloaded plugin executable."
+    return 1
+  }
+  mv "$tmp" "$PLUGIN_PATH" || {
+    rm -f "$tmp"
+    print "Could not replace plugin file: $PLUGIN_PATH"
+    return 1
+  }
+  print "Updated menutube from the latest release."
+}
+
 action_update_ytdlp() {
   command -v brew >/dev/null 2>&1 || { notify "menutube" "Homebrew not found — install yt-dlp manually."; return 1; }
   notify "menutube" "Updating yt-dlp via Homebrew…"
@@ -285,6 +418,7 @@ case "${1:-}" in
   log)      action_open_log;       exit 0 ;;
   refetch)  action_refetch_titles; exit 0 ;;
   update)   action_update_ytdlp;   exit 0 ;;
+  update-release) action_update_release; exit 0 ;;
 esac
 
 # ============================================================
@@ -413,4 +547,17 @@ else
 fi
 echo "--📝 Open mpv log | bash=$SCRIPT param1=log terminal=false"
 echo "--🔄 Refresh menu | refresh=true"
-echo "--menutube v$PLUGIN_VERSION | color=#666666 size=10"
+echo "-----"
+plugin_root="$(plugin_repo_root)"
+version_label="$(plugin_version_label "$plugin_root")"
+echo "--Version: ${version_label} | font=Menlo color=#888888"
+echo "--Plugin: ${PLUGIN_PATH/#$HOME/~} | font=Menlo size=10 color=#888888"
+if [[ -n "$plugin_root" ]]; then
+  git_summary="$(plugin_git_summary "$plugin_root")"
+  echo "--Repo: ${plugin_root/#$HOME/~} | font=Menlo size=10 color=#888888"
+  echo "--Git: ${git_summary:-unknown} | font=Menlo size=10 color=#888888"
+  echo "----Use git commands for development updates | color=gray size=10"
+else
+  echo "--⬆️ Update to latest release | bash=$SCRIPT param1=update-release terminal=true refresh=true"
+fi
+echo "--🌐 Open project page | href=$MENUTUBE_REPO_URL"
