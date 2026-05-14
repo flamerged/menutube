@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install runtime tools
+        run: sudo apt-get update && sudo apt-get install -y zsh jq lsof curl netcat-openbsd
+      - name: Run checks
+        run: ./scripts/check.sh
