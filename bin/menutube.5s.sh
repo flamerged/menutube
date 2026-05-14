@@ -1,6 +1,6 @@
 #!/bin/zsh
 # <xbar.title>menutube</xbar.title>
-# <xbar.version>v0.2.0</xbar.version> # x-release-please-version
+# <xbar.version>v0.3.0</xbar.version> # x-release-please-version
 # <xbar.author>flamerged</xbar.author>
 # <xbar.author.github>flamerged</xbar.author.github>
 # <xbar.desc>Background YouTube audio player for the menu bar — mpv + yt-dlp, with macOS media-key support.</xbar.desc>
@@ -12,7 +12,7 @@
 # <xbar.var>string(MENUTUBE_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"): User-Agent for HLS segment fetches</xbar.var>
 # <xbar.var>string(MENUTUBE_PLAYER_CLIENT="android,web"): yt-dlp extractor-args player_client list (anti-403 for YouTube live HLS)</xbar.var>
 # <swiftbar.title>menutube</swiftbar.title>
-# <swiftbar.version>v0.2.0</swiftbar.version> # x-release-please-version
+# <swiftbar.version>v0.3.0</swiftbar.version> # x-release-please-version
 # <swiftbar.author>flamerged</swiftbar.author>
 # <swiftbar.desc>Background YouTube audio player for the menu bar — mpv + yt-dlp, with macOS media-key support.</swiftbar.desc>
 # <swiftbar.refresh>5s</swiftbar.refresh>
@@ -31,7 +31,7 @@
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 export LC_ALL=en_US.UTF-8
 
-PLUGIN_VERSION="0.2.0" # x-release-please-version
+PLUGIN_VERSION="0.3.0" # x-release-please-version
 SCRIPT="$0"
 
 # ============================================================
