@@ -7,6 +7,7 @@ PLUGIN="$ROOT/bin/menutube.5s.sh"
 print "==> zsh syntax check"
 zsh -n "$PLUGIN"
 zsh -n "$ROOT/scripts/install-swiftbar.sh"
+zsh -n "$ROOT/scripts/install-dev-swiftbar.sh"
 bash -n "$ROOT/scripts/auto-release.sh"
 print "    OK"
 
@@ -22,7 +23,7 @@ for tag in \
   '<swiftbar.title>' \
   '<swiftbar.version>' \
   '<swiftbar.refresh>'; do
-  grep -q "$tag" "$PLUGIN" || { print -u2 "missing metadata tag: $tag"; exit 1; }
+  grep -F -q "$tag" "$PLUGIN" || { print -u2 "missing metadata tag: $tag"; exit 1; }
 done
 print "    OK"
 
@@ -32,6 +33,7 @@ for var in \
   'MENUTUBE_REPO_DIR' \
   'MENUTUBE_REPO_URL' \
   'MENUTUBE_RELEASE_ASSET_URL' \
+  'MENUTUBE_UPDATE_LOG' \
   'MENUTUBE_MPV' \
   'MENUTUBE_YTDLP' \
   'MENUTUBE_USER_AGENT' \

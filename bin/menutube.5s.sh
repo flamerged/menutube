@@ -10,6 +10,7 @@
 # <xbar.var>string(MENUTUBE_REPO_DIR=""): Optional menutube git checkout for source metadata</xbar.var>
 # <xbar.var>string(MENUTUBE_REPO_URL="https://github.com/flamerged/menutube"): menutube repository URL</xbar.var>
 # <xbar.var>string(MENUTUBE_RELEASE_ASSET_URL="https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh"): Latest release asset URL for copied-plugin updates</xbar.var>
+# <xbar.var>string(MENUTUBE_UPDATE_LOG="~/.cache/menutube/update.log"): Update log file path</xbar.var>
 # <xbar.var>string(MENUTUBE_MPV=""): Override path to mpv binary (auto-detected)</xbar.var>
 # <xbar.var>string(MENUTUBE_YTDLP=""): Override path to yt-dlp binary (auto-detected)</xbar.var>
 # <xbar.var>string(MENUTUBE_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"): User-Agent for HLS segment fetches</xbar.var>
@@ -49,11 +50,13 @@ SCRIPT="$0"
 : "${MENUTUBE_REPO_DIR:=}"
 : "${MENUTUBE_REPO_URL:=https://github.com/flamerged/menutube}"
 : "${MENUTUBE_RELEASE_ASSET_URL:=https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh}"
+: "${MENUTUBE_UPDATE_LOG:=$HOME/.cache/menutube/update.log}"
 # Expand leading ~ in case SwiftBar passes the xbar.var default literally.
 # Without this the plugin would read library.json from cwd, get nothing,
 # and render an empty library.
 MENUTUBE_CONFIG_DIR="${MENUTUBE_CONFIG_DIR/#\~/$HOME}"
 MENUTUBE_REPO_DIR="${MENUTUBE_REPO_DIR/#\~/$HOME}"
+MENUTUBE_UPDATE_LOG="${MENUTUBE_UPDATE_LOG/#\~/$HOME}"
 
 LIBRARY="$MENUTUBE_CONFIG_DIR/library.json"
 REPEAT_FILE="$MENUTUBE_CONFIG_DIR/repeat"      # "yes" | "no"
@@ -204,6 +207,17 @@ plugin_version_label() {
   printf 'v%s' "$PLUGIN_VERSION"
 }
 
+update_log() {
+  mkdir -p "${MENUTUBE_UPDATE_LOG:h}" 2>/dev/null || return
+  print -r -- "[$(date '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null || date)] ${1:-}" >> "$MENUTUBE_UPDATE_LOG" 2>/dev/null || true
+}
+
+update_message() {
+  local message="${1:-}"
+  print "$message"
+  update_log "$message"
+}
+
 # ============================================================
 # Actions
 # ============================================================
@@ -247,7 +261,6 @@ action_play() {
 action_toggle() { mpv_running && mpv_send '{"command":["cycle","pause"]}' >/dev/null; }
 action_stop()   { pkill -f "mpv .*--input-ipc-server=$SOCKET" 2>/dev/null; rm -f "$CURRENT_FILE" "$SOCKET"; }
 action_seek()   { mpv_running && mpv_send "{\"command\":[\"seek\",$1,\"relative\"]}" >/dev/null; }
-action_volume() { mpv_running && mpv_send "{\"command\":[\"set_property\",\"volume\",$1]}" >/dev/null; }
 
 action_repeat() {
   if repeat_on; then
@@ -303,6 +316,11 @@ action_remove() {
 
 action_edit_library() { open -a "TextEdit" "$LIBRARY"; }
 action_open_log()     { open -a "Console" "$LOG"; }
+action_open_update_log() {
+  mkdir -p "${MENUTUBE_UPDATE_LOG:h}" 2>/dev/null || true
+  touch "$MENUTUBE_UPDATE_LOG" 2>/dev/null || true
+  open -a "TextEdit" "$MENUTUBE_UPDATE_LOG"
+}
 
 action_refetch_titles() {
   local count fixed i url newtitle
@@ -324,40 +342,51 @@ action_refetch_titles() {
 }
 
 action_update_release() {
+  mkdir -p "${MENUTUBE_UPDATE_LOG:h}" 2>/dev/null || true
+  update_log "=== menutube release update started ==="
+  update_log "Plugin: $PLUGIN_PATH"
+  update_log "Asset: $MENUTUBE_RELEASE_ASSET_URL"
+
   # Refuse if the running plugin file lives inside its own git checkout —
   # we don't want to clobber a developer's working tree from the menu.
   local repo_root
   repo_root="$(plugin_repo_root)"
   if [[ -n "$repo_root" && "$PLUGIN_PATH" == "$repo_root"/* ]]; then
-    print "Plugin appears to be running from a git checkout: $repo_root"
-    print "Use git commands in the checkout for development updates."
+    update_message "Plugin appears to be running from a git checkout: $repo_root"
+    update_message "Use git commands in the checkout for development updates."
     return 1
   fi
 
   local curl_bin
   curl_bin="$(command -v curl)"
   if [[ -z "$curl_bin" ]]; then
-    print "curl is required to update from the latest release."
+    update_message "curl is required to update from the latest release."
     return 1
   fi
   if [[ ! -w "$PLUGIN_PATH" || ! -w "$PLUGIN_DIR" ]]; then
-    print "Plugin file or directory is not writable: $PLUGIN_PATH"
+    update_message "Plugin file or directory is not writable: $PLUGIN_PATH"
+    return 1
+  fi
+  if [[ "$MENUTUBE_RELEASE_ASSET_URL" != https://* ]]; then
+    update_message "Refusing non-HTTPS release asset URL: $MENUTUBE_RELEASE_ASSET_URL"
     return 1
   fi
 
-  local tmp first_line content
+  local tmp first_line content curl_log
   tmp="${PLUGIN_DIR}/.menutube.5s.sh.$$"
+  curl_log="$MENUTUBE_UPDATE_LOG"
+  [[ -d "${MENUTUBE_UPDATE_LOG:h}" && -w "${MENUTUBE_UPDATE_LOG:h}" ]] || curl_log="/dev/null"
   rm -f "$tmp"
 
-  print "Downloading latest menutube release asset..."
+  update_message "Downloading latest menutube release asset..."
   if ! "$curl_bin" -fsSL \
     --connect-timeout 5 \
     --max-time 30 \
     --retry 2 \
     --retry-delay 1 \
-    "$MENUTUBE_RELEASE_ASSET_URL" -o "$tmp"; then
+    "$MENUTUBE_RELEASE_ASSET_URL" -o "$tmp" >> "$curl_log" 2>&1; then
     rm -f "$tmp"
-    print "Download failed: $MENUTUBE_RELEASE_ASSET_URL"
+    update_message "Download failed: $MENUTUBE_RELEASE_ASSET_URL"
     return 1
   fi
 
@@ -367,21 +396,21 @@ action_update_release() {
      || "$content" != *"<xbar.title>menutube</xbar.title>"* \
      || "$content" != *"PLUGIN_VERSION=\""* ]]; then
     rm -f "$tmp"
-    print "Downloaded file did not look like a menutube plugin."
+    update_message "Downloaded file did not look like a menutube plugin."
     return 1
   fi
 
   chmod +x "$tmp" || {
     rm -f "$tmp"
-    print "Could not mark downloaded plugin executable."
+    update_message "Could not mark downloaded plugin executable."
     return 1
   }
   mv "$tmp" "$PLUGIN_PATH" || {
     rm -f "$tmp"
-    print "Could not replace plugin file: $PLUGIN_PATH"
+    update_message "Could not replace plugin file: $PLUGIN_PATH"
     return 1
   }
-  print "Updated menutube from the latest release."
+  update_message "Updated menutube from the latest release."
 }
 
 action_update_ytdlp() {
@@ -410,15 +439,15 @@ case "${1:-}" in
   toggle)   action_toggle;         exit 0 ;;
   stop)     action_stop;           exit 0 ;;
   seek)     action_seek   "$2";    exit 0 ;;
-  volume)   action_volume "$2";    exit 0 ;;
   repeat)   action_repeat;         exit 0 ;;
   add)      action_add;            exit 0 ;;
   remove)   action_remove "$2";    exit 0 ;;
   edit)     action_edit_library;   exit 0 ;;
   log)      action_open_log;       exit 0 ;;
+  update-log) action_open_update_log; exit 0 ;;
   refetch)  action_refetch_titles; exit 0 ;;
   update)   action_update_ytdlp;   exit 0 ;;
-  update-release) action_update_release; exit 0 ;;
+  update-release) action_update_release; exit $? ;;
 esac
 
 # ============================================================
@@ -494,11 +523,6 @@ if $running; then
   else
     echo "🔁 Repeat: OFF — click to loop track | bash=$SCRIPT param1=repeat terminal=false refresh=true"
   fi
-  echo "Volume"
-  echo "--🔈 25% | bash=$SCRIPT param1=volume param2=25 terminal=false refresh=true"
-  echo "--🔉 50% | bash=$SCRIPT param1=volume param2=50 terminal=false refresh=true"
-  echo "--🔊 75% | bash=$SCRIPT param1=volume param2=75 terminal=false refresh=true"
-  echo "--🔊 100% | bash=$SCRIPT param1=volume param2=100 terminal=false refresh=true"
   echo "---"
 fi
 
@@ -558,6 +582,7 @@ if [[ -n "$plugin_root" ]]; then
   echo "--Git: ${git_summary:-unknown} | font=Menlo size=10 color=#888888"
   echo "----Use git commands for development updates | color=gray size=10"
 else
-  echo "--⬆️ Update to latest release | bash=$SCRIPT param1=update-release terminal=true refresh=true"
+  echo "--⬆️ Update to latest release | bash=$SCRIPT param1=update-release terminal=false refresh=true"
 fi
+[[ -f "$MENUTUBE_UPDATE_LOG" ]] && echo "--📝 Open update log | bash=$SCRIPT param1=update-log terminal=false"
 echo "--🌐 Open project page | href=$MENUTUBE_REPO_URL"

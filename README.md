@@ -59,10 +59,10 @@ Clone the repo only when you want a source checkout for development:
 ```sh
 git clone https://github.com/flamerged/menutube.git
 cd menutube
-./scripts/install-swiftbar.sh "$HOME/SwiftBarPlugins"
+./scripts/install-dev-swiftbar.sh "$HOME/SwiftBarPlugins"
 ```
 
-Release installs show **Update to latest release**, so normal users do not need git. Source checkout installs show the current branch and commit for diagnostics, but hide the menu updater to avoid overwriting checkout-managed files. Development updates should use normal git commands in the checkout.
+Release installs show **Update to latest release**, so normal users do not need git. The updater runs in the background, writes to `MENUTUBE_UPDATE_LOG`, and replaces the plugin with the latest release asset. Source checkout installs show the current branch and commit for diagnostics, but hide the menu updater to avoid overwriting checkout-managed files. Development updates should use normal git commands in the checkout.
 
 ### Linux
 
@@ -103,7 +103,8 @@ menutube works without configuration. These environment variables can tailor it 
 | `MENUTUBE_CONFIG_DIR` | `~/.config/menutube` | Library and preferences directory |
 | `MENUTUBE_REPO_DIR` | empty | Optional menutube git checkout for source metadata (hides the menu updater) |
 | `MENUTUBE_REPO_URL` | `https://github.com/flamerged/menutube` | Repository URL for the "Open project page" footer link |
-| `MENUTUBE_RELEASE_ASSET_URL` | `https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh` | Latest release asset URL used by the "Update to latest release" action |
+| `MENUTUBE_RELEASE_ASSET_URL` | `https://github.com/flamerged/menutube/releases/latest/download/menutube.5s.sh` | HTTPS latest release asset URL used by the "Update to latest release" action |
+| `MENUTUBE_UPDATE_LOG` | `$HOME/.cache/menutube/update.log` | Update log path |
 | `MENUTUBE_MPV` | auto-detected | Override path to mpv |
 | `MENUTUBE_YTDLP` | auto-detected | Override path to yt-dlp |
 | `MENUTUBE_USER_AGENT` | Safari 17 desktop UA | User-Agent for HLS segment fetches |
