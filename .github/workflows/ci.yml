@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install runtime tools
-        run: sudo apt-get update && sudo apt-get install -y zsh jq lsof curl netcat-openbsd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh jq lsof curl netcat-openbsd mpv yt-dlp git
+          # Verify binaries the plugin's dry-render checks for at startup
+          mpv --version | head -1
+          yt-dlp --version
       - name: Run checks
         run: ./scripts/check.sh

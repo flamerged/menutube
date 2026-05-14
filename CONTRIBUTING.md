@@ -45,4 +45,18 @@ mpv's log lives at `$TMPDIR/menutube-mpv.log` — tail it while testing playback
 
 ## Releases
 
-This repo uses [release-please](https://github.com/googleapis/release-please). Versioning is derived from conventional commit messages on `main`. The plugin file's version markers (`# x-release-please-version`) are kept in sync automatically.
+Releases are produced by `scripts/auto-release.sh`, triggered from `.github/workflows/release.yml` on every push to `main` (and via `workflow_dispatch`). The script looks at the commit subjects since the last `v*` tag and bumps:
+
+- `feat:` / `feat(scope):` → minor
+- `fix:` or `perf:` → patch
+- any `type!:` subject or `BREAKING CHANGE:` body → major
+
+If there are no releasable conventional commits, nothing happens. Otherwise the script tags the merge commit, patches `bin/menutube.5s.sh`'s version markers, and uploads it as the release asset.
+
+Test the bump logic locally before pushing:
+
+```sh
+AUTO_RELEASE_DRY_RUN=1 ./scripts/auto-release.sh
+```
+
+`main` is protected — direct pushes are not allowed. All changes go through PRs. Squash-merging is the only enabled merge method, and the PR title becomes the squash commit subject — so the PR title itself drives the release bump.
