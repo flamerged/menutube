@@ -238,7 +238,7 @@ release_tag_norm() {
 latest_release_tag_from_asset_url() {
   local tag
   tag="$(printf '%s' "$MENUTUBE_RELEASE_ASSET_URL" | /usr/bin/sed -n 's#.*releases/download/\([^/]*\)/.*#\1#p' | head -1)"
-  [[ -n "$tag" ]] || return 1
+  [[ -n "$tag" && "$tag" != "latest" ]] || return 1
   printf '%s' "$tag"
 }
 
@@ -329,7 +329,8 @@ maybe_refresh_release_check() {
     return
   fi
   mkdir -p "${MENUTUBE_RELEASE_CHECK_CACHE:h}" 2>/dev/null || return
-  : > "${MENUTUBE_RELEASE_CHECK_CACHE}.lock" 2>/dev/null || return
+  [[ -n "$lock_age" ]] && rm -f "${MENUTUBE_RELEASE_CHECK_CACHE}.lock" 2>/dev/null || true
+  ( set -C; : > "${MENUTUBE_RELEASE_CHECK_CACHE}.lock" ) 2>/dev/null || return
   "$SCRIPT" check-release >/dev/null 2>&1 &
 }
 
