@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Debug mode toggle** in the Tools submenu (🐞). Default playback uses a quieter mpv log (`--msg-level=all=info,ipc=warn,ffmpeg=warn`) and truncates the log on stop, so long-running sessions don't bloat `$TMPDIR`. Toggling debug ON flips mpv to verbose (`--msg-level=all=v`) and preserves the log across stop/play cycles for diagnostics. State persists in `$MENUTUBE_CONFIG_DIR/debug` and takes effect on the next track.
 - **Update to latest release** menu action for copied-plugin installs: downloads the release asset from `MENUTUBE_RELEASE_ASSET_URL` via `curl` with timeout/retry, validates shebang + plugin metadata, and atomically replaces the plugin file. Refuses to run when the plugin path is inside a git checkout (developers should use git).
 - Live version label in the Tools footer derived from the local git tag (`git describe --tags HEAD`), with a fallback to the hard-coded `PLUGIN_VERSION` when not in a checkout.
 - "Open project page" footer link pointing at `MENUTUBE_REPO_URL`.

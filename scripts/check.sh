@@ -53,6 +53,21 @@ print -r -- "$output" | grep -q '🛠 Edit library file' || { print -u2 "Edit ac
 print -r -- "$output" | grep -q '🔧 Tools' || { print -u2 "Tools section missing"; exit 1; }
 print "    OK"
 
+print "==> debug-mode toggle (renders + persists; regression guard)"
+debug_cfg="$(mktemp -d)"
+# OFF state: render mentions "Debug mode: OFF"
+off_output="$(MENUTUBE_CONFIG_DIR="$debug_cfg" MENUTUBE_CHECK_RELEASE_UPDATES=0 "$PLUGIN")"
+print -r -- "$off_output" | grep -q 'Debug mode: OFF' \
+  || { print -u2 "default render should show 'Debug mode: OFF'"; exit 1; }
+# Flip via dispatch
+MENUTUBE_CONFIG_DIR="$debug_cfg" "$PLUGIN" debug
+[[ "$(cat "$debug_cfg/debug" 2>/dev/null)" == "yes" ]] \
+  || { print -u2 "action debug did not write 'yes' to \$DEBUG_FILE"; exit 1; }
+on_output="$(MENUTUBE_CONFIG_DIR="$debug_cfg" MENUTUBE_CHECK_RELEASE_UPDATES=0 "$PLUGIN")"
+print -r -- "$on_output" | grep -q 'Debug mode: ON' \
+  || { print -u2 "render after toggle should show 'Debug mode: ON'"; exit 1; }
+print "    OK"
+
 print "==> literal-tilde defense (regression guard for the 0.1.0 bug)"
 literal_tilde_output="$(MENUTUBE_CONFIG_DIR='~/.config/menutube-literal-tilde-test' MENUTUBE_CHECK_RELEASE_UPDATES=0 "$PLUGIN" 2>&1 || true)"
 print -r -- "$literal_tilde_output" | grep -q '📚 Library' \

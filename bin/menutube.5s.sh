@@ -67,6 +67,7 @@ MENUTUBE_RELEASE_CHECK_CACHE="${MENUTUBE_RELEASE_CHECK_CACHE/#\~/$HOME}"
 
 LIBRARY="$MENUTUBE_CONFIG_DIR/library.json"
 REPEAT_FILE="$MENUTUBE_CONFIG_DIR/repeat"      # "yes" | "no"
+DEBUG_FILE="$MENUTUBE_CONFIG_DIR/debug"        # "yes" | "no" — verbose mpv logging + no log truncation on stop
 SOCKET="${TMPDIR:-/tmp}/menutube-mpv.sock"
 SOCKET="${SOCKET%/}"                            # strip trailing slash on $TMPDIR
 CURRENT_FILE="${TMPDIR:-/tmp}/menutube.current"
@@ -131,6 +132,7 @@ mpv_get() {
 }
 
 repeat_on() { [[ -f "$REPEAT_FILE" ]] && [[ "$(cat "$REPEAT_FILE" 2>/dev/null)" == "yes" ]]; }
+debug_on()  { [[ -f "$DEBUG_FILE" ]]  && [[ "$(cat "$DEBUG_FILE"  2>/dev/null)" == "yes" ]]; }
 
 # ============================================================
 # yt-dlp helpers
@@ -385,7 +387,7 @@ update_message() {
 # ============================================================
 
 action_play() {
-  local idx="$1" url title loop_mode
+  local idx="$1" url title loop_mode msg_level
   url=$("$JQ"   -r ".[$idx].url"   "$LIBRARY")
   title=$("$JQ" -r ".[$idx].title" "$LIBRARY")
   [[ -z "$url" || "$url" == "null" ]] && return 1
@@ -396,6 +398,15 @@ action_play() {
   rm -f "$SOCKET"
   loop_mode="no"
   repeat_on && loop_mode="inf"
+  # Default mode keeps warnings/errors + a few useful info lines (audio device
+  # selection, playback start). Verbose IPC chatter from menu polling and
+  # per-segment ffmpeg HLS requests are suppressed. Debug mode flips everything
+  # to verbose so the log captures full diagnostics.
+  if debug_on; then
+    msg_level="all=v"
+  else
+    msg_level="all=info,ipc=warn,ffmpeg=warn"
+  fi
   nohup "$MPV" \
     --no-video \
     --no-input-terminal \
@@ -413,7 +424,7 @@ action_play() {
     --cache-secs=20 \
     --demuxer-max-bytes=128MiB \
     --log-file="$LOG" \
-    --msg-level=all=info \
+    --msg-level="$msg_level" \
     "$url" \
     >/dev/null 2>&1 &
   disown
@@ -421,8 +432,28 @@ action_play() {
 }
 
 action_toggle() { mpv_running && mpv_send '{"command":["cycle","pause"]}' >/dev/null; }
-action_stop()   { pkill -f "mpv .*--input-ipc-server=$SOCKET" 2>/dev/null; rm -f "$CURRENT_FILE" "$SOCKET"; }
+
+action_stop() {
+  pkill -f "mpv .*--input-ipc-server=$SOCKET" 2>/dev/null
+  rm -f "$CURRENT_FILE" "$SOCKET"
+  # Truncate the mpv log on stop so each new track starts fresh. Debug mode
+  # preserves the log so diagnostic context survives a stop/play cycle.
+  if ! debug_on; then
+    : > "$LOG" 2>/dev/null || true
+  fi
+}
 action_seek()   { mpv_running && mpv_send "{\"command\":[\"seek\",$1,\"relative\"]}" >/dev/null; }
+
+action_debug() {
+  # Toggle the persisted debug preference. Takes effect on the NEXT track
+  # (msg-level is baked in at mpv launch time). action_stop also reads
+  # the flag at stop time so the log truncation matches the active mode.
+  if debug_on; then
+    printf 'no' > "$DEBUG_FILE"
+  else
+    printf 'yes' > "$DEBUG_FILE"
+  fi
+}
 
 action_repeat() {
   if repeat_on; then
@@ -602,6 +633,7 @@ case "${1:-}" in
   stop)     action_stop;           exit 0 ;;
   seek)     action_seek   "$2";    exit 0 ;;
   repeat)   action_repeat;         exit 0 ;;
+  debug)    action_debug;          exit 0 ;;
   add)      action_add;            exit 0 ;;
   remove)   action_remove "$2";    exit 0 ;;
   edit)     action_edit_library;   exit 0 ;;
@@ -731,6 +763,11 @@ if repeat_on; then
   echo "--🔁 Repeat mode: ON (next plays will loop) | bash=$SCRIPT param1=repeat terminal=false refresh=true"
 else
   echo "--🔁 Repeat mode: OFF (next plays will not loop) | bash=$SCRIPT param1=repeat terminal=false refresh=true"
+fi
+if debug_on; then
+  echo "--🐞 Debug mode: ON (verbose mpv log, no truncate on stop) | color=#cc6633 bash=$SCRIPT param1=debug terminal=false refresh=true"
+else
+  echo "--🐞 Debug mode: OFF (quiet log, truncate on stop) | bash=$SCRIPT param1=debug terminal=false refresh=true"
 fi
 echo "--📝 Open mpv log | bash=$SCRIPT param1=log terminal=false"
 echo "--🔄 Refresh menu | refresh=true"
