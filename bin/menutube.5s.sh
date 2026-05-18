@@ -398,14 +398,22 @@ action_play() {
   rm -f "$SOCKET"
   loop_mode="no"
   repeat_on && loop_mode="inf"
-  # Default mode keeps warnings/errors + a few useful info lines (audio device
-  # selection, playback start). Verbose IPC chatter from menu polling and
-  # per-segment ffmpeg HLS requests are suppressed. Debug mode flips everything
-  # to verbose so the log captures full diagnostics.
+  # Verbosity:
+  #   Default mode keeps warnings/errors + a few useful info lines (audio
+  #   device selection via ao module). Debug mode flips everything to
+  #   verbose so the log captures full diagnostics.
+  #
+  #   Tricky part: mpv's `--log-file` ignores `--msg-level` entirely and
+  #   always writes at internal verbose level — so passing `ipc=warn`
+  #   doesn't stop the per-poll `[v][ipc_NNNNN] Client connected` chatter
+  #   that bloated the log to 29 MB in <72h before this fix. The fix is to
+  #   drop `--log-file` and redirect mpv's stderr into the log instead.
+  #   stderr DOES respect `--msg-level`, so the file shrinks by >99%.
+  #   `--log-file-level` doesn't exist in mpv 0.41; only stderr-redirect works.
   if debug_on; then
     msg_level="all=v"
   else
-    msg_level="all=info,ipc=warn,ffmpeg=warn"
+    msg_level="all=info,ao=v,ipc=warn,ffmpeg=warn"
   fi
   nohup "$MPV" \
     --no-video \
@@ -423,10 +431,9 @@ action_play() {
     --cache=yes \
     --cache-secs=20 \
     --demuxer-max-bytes=128MiB \
-    --log-file="$LOG" \
     --msg-level="$msg_level" \
     "$url" \
-    >/dev/null 2>&1 &
+    2>>"$LOG" >/dev/null &
   disown
   printf '%s' "$title" > "$CURRENT_FILE"
 }
